@@ -1,0 +1,20 @@
+name: 'Linear Github Action'
+author: Sergey Sova
+description: 'Move Linear.app issues on PullRequest states.'
+inputs:
+  linear-token:
+    description: 'Token'
+    required: true
+  issue-prefixes:
+    required: true
+    description: 'Issue prefix to search in PullRequest title. Ex.: "ACC DEM ANO"'
+  state-map:
+    required: true
+    description: 'How to change issue state when pull request is opened or merged (case sensitive)'
+    default: 'drafted = In Progress; ready = In Review; review_requested = In Review; merged = Done; closed = Cancelled'
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+branding:
+  color: blue
+  icon: download-cloud

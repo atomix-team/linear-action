@@ -1,0 +1,41 @@
+{
+  "name": "action",
+  "version": "0.1.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest",
+    "format": "prettier --write 'src/**/*.{ts,tsx,js, jsx}'",
+    "build": "tsc --outDir ./dist"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sergeysova/linear-action.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sergeysova/linear-action/issues"
+  },
+  "homepage": "https://github.com/sergeysova/linear-action#readme",
+  "devDependencies": {
+    "@actions/core": "^1.4.0",
+    "@actions/github": "^5.0.0",
+    "@babel/core": "^7.14.3",
+    "@babel/plugin-proposal-nullish-coalescing-operator": "^7.14.2",
+    "@babel/plugin-proposal-optional-chaining": "^7.14.2",
+    "@babel/preset-env": "^7.14.4",
+    "@babel/preset-typescript": "^7.13.0",
+    "@types/jest": "^26.0.23",
+    "@types/node": "^15.12.2",
+    "babel-jest": "^27.0.2",
+    "babel-plugin-module-resolver": "^4.1.0",
+    "jest": "^27.0.4",
+    "prettier": "^2.3.1",
+    "typescript": "^4.3.2"
+  },
+  "dependencies": {
+    "@linear/sdk": "^1.14.0",
+    "core-js": "^3.14.0"
+  }
+}

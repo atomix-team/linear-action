@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "declaration": false,
+    "lib": ["es2019", "esnext", "dom"],
+    "noImplicitAny": false,
+    "outDir": "dist",
+    "moduleResolution": "node",
+    "module": "CommonJS",
+    "target": "ES2021", // Node.js 12, see https://node.green,
+    "types": ["node", "jest"]
+  },
+  "include": ["src"]
+}
