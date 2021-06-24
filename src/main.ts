@@ -3,6 +3,7 @@ import { context, getOctokit } from '@actions/github';
 import { Issue, LinearClient, LinearFetch, Team, User, WorkflowState } from '@linear/sdk';
 
 const linearToken = getInput('linear-token', { required: true });
+const issuesRequired = getInput('issues-required', { required: false }) === 'true';
 const issuePrefixes = getInput('issue-prefixes', { required: true })
   .split(' ')
   .map((prefix) => prefix.trim())
@@ -30,10 +31,29 @@ const octokit = getOctokit(getInput('github-token') || process.env.GITHUB_TOKEN)
 
 async function main() {
   const { nodes: allTeams } = await linear.teams();
+  // Validate configuration state-map, that all pr state exist in allowedPullStates
   const resolvedTeams = await resolveValidTeamsByPrefixes(allTeams);
-  await Promise.all(resolvedTeams.map((team) => assertStateMap(team)));
+  await Promise.all(resolvedTeams.map((team) => linearStateMapAssert(team)));
 
   console.log('——', context);
+  const { action, eventName } = context.payload;
+  const { title, url: prUrl, review_comments_url: prReviewUrl } = context.payload.pull_request;
+
+  const foundIssuesIds = findIssuesInText(title);
+  if (issuesRequired && foundIssuesIds.length === 0) {
+    // stop check
+    throw new Error('Please, set issues in PR title');
+  }
+
+  await Promise.all(
+    foundIssuesIds.map(async (id) => {
+      const issue = await linearIssueFind(id);
+      await linearIssueCommentSend(
+        issue,
+        `PR for this link [here](${prUrl}). You can review it on [this link](${prReviewUrl})`,
+      );
+    }),
+  );
 }
 
 function findIssuesInText(text: string): string[] {
@@ -61,8 +81,8 @@ async function resolveValidTeamsByPrefixes(teams: Team[]): Promise<Team[]> {
   return resolvedTeams;
 }
 
-async function assertStateMap(team: Team) {
-  const workflowStates = await getWorkflowStates(team);
+async function linearStateMapAssert(team: Team) {
+  const workflowStates = await linearWorkflowStatesList(team);
 
   stateMap.forEach(({ linearStateName, pullState }) => {
     const found = workflowStates.find((workflowState) => workflowState.name === linearStateName);
@@ -77,7 +97,7 @@ async function assertStateMap(team: Team) {
 
 let statesCache: Record<string, WorkflowState[]> = {};
 
-async function getWorkflowStates(team: Team): Promise<WorkflowState[]> {
+async function linearWorkflowStatesList(team: Team): Promise<WorkflowState[]> {
   if (statesCache[team.key]?.length > 0) {
     return statesCache[team.key];
   }
@@ -98,18 +118,18 @@ async function getWorkflowStates(team: Team): Promise<WorkflowState[]> {
   return teamStates;
 }
 
-async function findIssue(identifier: string): Promise<Issue | null> {
+async function linearIssueFind(identifier: string): Promise<Issue | null> {
   const { nodes: found } = await linear.issueSearch(identifier);
   if (found.length === 0) return null;
 
   return found.find((issue) => issue.identifier === identifier) ?? null;
 }
 
-async function moveIssue(issue: Issue, moveTo: string) {
+async function linearIssueMove(issue: Issue, moveTo: string) {
   const currentState = await issue.state;
   if (currentState.name !== moveTo) {
     const team = await issue.team;
-    const availableStatesInTeam = await getWorkflowStates(team);
+    const availableStatesInTeam = await linearWorkflowStatesList(team);
     const moveToState = availableStatesInTeam.find((state) => state.name === moveTo);
     if (!moveToState) {
       throw new Error(`Not found state "${moveTo}" in team ${team.name} ${team.key}`);
@@ -118,7 +138,7 @@ async function moveIssue(issue: Issue, moveTo: string) {
   }
 }
 
-async function sendIssueComment(issue: Issue, markdown: string) {
+async function linearIssueCommentSend(issue: Issue, markdown: string) {
   await linear.commentCreate({ body: markdown, issueId: issue.id });
 }
 
