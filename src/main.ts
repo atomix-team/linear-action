@@ -36,8 +36,8 @@ async function main() {
   await Promise.all(resolvedTeams.map((team) => linearStateMapAssert(team)));
 
   console.log('——', context);
-  const { action, eventName, serverUrl } = context.payload;
-  const { title, draft, html_url: prHtmlUrl } = context.payload.pull_request;
+  const { action, eventName } = context.payload;
+  const { title, draft, html_url: prHtmlUrl, id: prId } = context.payload.pull_request;
 
   const foundIssuesIds = findIssuesInText(title);
   if (issuesRequired && foundIssuesIds.length === 0) {
@@ -45,14 +45,20 @@ async function main() {
     throw new Error('Please, set issues in PR title');
   }
 
+  let status = 'ready';
+  if (!draft) {
+  }
+  if (draft) {
+    status = 'drafted';
+  }
+
   await Promise.all(
     foundIssuesIds.map(async (id) => {
       const issue = await linearIssueFind(id);
 
-      const prLink = `https://${serverUrl}/${prHtmlUrl}`;
       await linearIssueCommentSend(
         issue,
-        `Pull request [${title}](${prLink}). You can [review it](${prLink}/files)`,
+        `[#${prId} ${title}](${prHtmlUrl}). You can [review it](${prHtmlUrl}/files)`,
       );
     }),
   );
