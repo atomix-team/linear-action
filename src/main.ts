@@ -36,8 +36,8 @@ async function main() {
   await Promise.all(resolvedTeams.map((team) => linearStateMapAssert(team)));
 
   console.log('——', context);
-  const { action, eventName } = context.payload;
-  const { title, url: prUrl, review_comments_url: prReviewUrl } = context.payload.pull_request;
+  const { action, eventName, serverUrl } = context.payload;
+  const { title, draft, html_url: prHtmlUrl } = context.payload.pull_request;
 
   const foundIssuesIds = findIssuesInText(title);
   if (issuesRequired && foundIssuesIds.length === 0) {
@@ -48,9 +48,11 @@ async function main() {
   await Promise.all(
     foundIssuesIds.map(async (id) => {
       const issue = await linearIssueFind(id);
+
+      const prLink = `https://${serverUrl}/${prHtmlUrl}`;
       await linearIssueCommentSend(
         issue,
-        `PR for this link [here](${prUrl}). You can review it on [this link](${prReviewUrl})`,
+        `Pull request [${title}](${prLink}). You can [review it](${prLink}/files)`,
       );
     }),
   );
