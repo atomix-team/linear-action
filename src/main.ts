@@ -37,7 +37,7 @@ async function main() {
 
   console.log('——', context);
   const { action, eventName } = context.payload;
-  const { title, draft, html_url: prHtmlUrl, id: prId } = context.payload.pull_request;
+  const { title, draft, html_url: prHtmlUrl, number: prId } = context.payload.pull_request;
 
   const foundIssuesIds = findIssuesInText(title);
   if (issuesRequired && foundIssuesIds.length === 0) {
