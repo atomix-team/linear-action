@@ -15,7 +15,7 @@ inputs:
   state-map:
     required: true
     description: 'How to change issue state when pull request is opened or merged (case sensitive)'
-    default: 'drafted = In Progress; ready = In Review; review_requested = In Review; merged = Done; closed = Canceled'
+    default: 'drafted = In Progress; ready = In Review; merged = Done; closed = Canceled'
 runs:
   using: 'docker'
   image: 'Dockerfile'

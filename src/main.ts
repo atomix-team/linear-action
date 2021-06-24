@@ -1,6 +1,7 @@
 import { getInput, setFailed } from '@actions/core';
 import { context, getOctokit } from '@actions/github';
 import { Issue, LinearClient, LinearFetch, Team, User, WorkflowState } from '@linear/sdk';
+import { WebhookPayload } from '@actions/github/lib/interfaces';
 
 const linearToken = getInput('linear-token', { required: true });
 const issuesRequired = getInput('issues-required', { required: false }) === 'true';
@@ -9,7 +10,7 @@ const issuePrefixes = getInput('issue-prefixes', { required: true })
   .map((prefix) => prefix.trim())
   .filter(Boolean);
 
-// input "drafted = In Progress; ready = In Review; review_requested = In Review; merged = Done; closed = Cancelled"
+// input "drafted = In Progress; ready = In Review; merged = Done; closed = Cancelled"
 const stateMap = getInput('state-map', { required: true })
   .split(';')
   .map((pair) =>
@@ -22,7 +23,8 @@ const stateMap = getInput('state-map', { required: true })
   .filter((pair) => pair.length > 1)
   .map(([pullState, linearStateName]) => ({ pullState, linearStateName }));
 
-const allowedPullStates = ['drafted', 'ready', 'review_requested', 'merged', 'closed'];
+type PullState = 'drafted' | 'ready' | 'merged' | 'closed';
+const allowedPullStates: PullState[] = ['drafted', 'ready', 'merged', 'closed'];
 
 const issueRegex = new RegExp(`((${issuePrefixes.join('|')})-\\d+)`, 'ig');
 
@@ -45,24 +47,70 @@ async function main() {
     throw new Error('Please, set issues in PR title');
   }
 
-  let status = 'ready';
-  if (!draft) {
-  }
-  if (draft) {
-    status = 'drafted';
-  }
+  const prStatus = prStatusDetect(context.payload.pull_request as PR);
+  const linearState = prStatusMapToLinear(prStatus);
+  const linearPrLink = `[#${prId} ${title}](${prHtmlUrl}).`;
+  const linearIssueText = linearCommentText[prStatus](context.payload.pull_request as PR);
+
+  const linearComment = `${linearPrLink} ${linearIssueText}`;
 
   await Promise.all(
     foundIssuesIds.map(async (id) => {
       const issue = await linearIssueFind(id);
 
-      await linearIssueCommentSend(
-        issue,
-        `[#${prId} ${title}](${prHtmlUrl}). You can [review it](${prHtmlUrl}/files)`,
-      );
+      await linearIssueMove(issue, linearState);
+      await linearIssueCommentSend(issue, linearComment);
     }),
   );
 }
+
+function prStatusMapToLinear(prStatus: PullState): string {
+  const state = stateMap.find(({ pullState }) => pullState === prStatus);
+  if (!state) {
+    throw new Error(`Not found linear state for "${prStatus}"`);
+  }
+  return state.linearStateName;
+}
+
+interface PR {
+  number: number;
+  rebaseable: boolean;
+  merged: boolean;
+  draft: boolean;
+  html_url: string;
+  state: 'open' | 'closed';
+}
+
+function prStatusDetect(pr: PR): PullState {
+  if (prIsDrafted(pr)) return 'drafted';
+  if (prIsReady(pr)) return 'ready';
+  if (prIsMerged(pr)) return 'merged';
+  if (prIsClosed(pr)) return 'closed';
+  throw new Error('Unknown status of pull request');
+}
+
+function prIsDrafted(pr: PR): boolean {
+  return pr.draft;
+}
+
+function prIsReady(pr: PR): boolean {
+  return pr.state === 'open' && !pr.draft;
+}
+
+function prIsMerged(pr: PR): boolean {
+  return pr.state === 'closed' && pr.merged;
+}
+
+function prIsClosed(pr: PR): boolean {
+  return pr.state === 'closed' && !pr.merged;
+}
+
+const linearCommentText: { [K in PullState]: (pr: PR) => string } = {
+  drafted: (pr: PR) => `Work started, pull request in draft.`,
+  ready: (pr: PR) => `Pull request updated and [ready for review](${pr.html_url}/files).`,
+  merged: (pr: PR) => `Pull request merged.`,
+  closed: (pr: PR) => 'Pull request closed without merge.',
+};
 
 function findIssuesInText(text: string): string[] {
   return [...text.matchAll(issueRegex)].map(([match]) => match);
