@@ -39,6 +39,7 @@ async function main() {
 
   console.log('——', context);
   const { action, eventName } = context.payload;
+  // before resolving next state (and sending comment) check out, that linear issue already in current state
   const { title, draft, html_url: prHtmlUrl, number: prId } = context.payload.pull_request;
 
   const foundIssuesIds = findIssuesInText(title);
@@ -48,7 +49,7 @@ async function main() {
   }
 
   const prStatus = prStatusDetect(context.payload.pull_request as PR);
-  const linearState = prStatusMapToLinear(prStatus);
+  const linearNextState = prStatusMapToLinear(prStatus);
   const linearPrLink = `[#${prId} ${title}](${prHtmlUrl}).`;
   const linearIssueText = linearCommentText[prStatus](context.payload.pull_request as PR);
 
@@ -57,9 +58,11 @@ async function main() {
   await Promise.all(
     foundIssuesIds.map(async (id) => {
       const issue = await linearIssueFind(id);
-
-      await linearIssueMove(issue, linearState);
-      await linearIssueCommentSend(issue, linearComment);
+      const currentState = await issue.state;
+      if (currentState.name !== linearNextState) {
+        await linearIssueMove(issue, linearNextState);
+        await linearIssueCommentSend(issue, linearComment);
+      }
     }),
   );
 }
