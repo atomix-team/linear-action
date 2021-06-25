@@ -73,7 +73,7 @@ async function main() {
 
   const linearComment = `${linearPrLink} ${linearIssueText}`;
 
-  const processIssue = async (issue: Issue) => {
+  const linearIssueProcess = async (issue: Issue) => {
     const currentState = await issue.state;
     if (currentState.name !== linearNextState) {
       await linearIssueMove(issue, linearNextState);
@@ -82,7 +82,7 @@ async function main() {
   };
 
   for (const issue of foundIssues) {
-    jobs.add(processIssue(issue));
+    jobs.add(linearIssueProcess(issue));
   }
 
   await jobs.complete();
@@ -100,7 +100,7 @@ function createJobs() {
 }
 
 async function githubSyncLabels({ linearIssues, pr }: { linearIssues: Issue[]; pr: PR }) {
-  const repoAllLabels = new Set(await githubGetRepoLabels());
+  const repoAllLabels = new Set(await repoLabelsList());
   const prCurrentLabels = new Set(pr.labels.map((label) => label.name));
   const linearActualLabels = new Set<string>();
   const linearLabelColors = new Map<string, string>();
@@ -136,26 +136,26 @@ async function githubSyncLabels({ linearIssues, pr }: { linearIssues: Issue[]; p
     }
   }
 
-  const promises: Promise<void>[] = [];
+  const jobs = createJobs()
 
   if (toAdd.length > 0) {
-    promises.push(githubAddLabels(pr.number, toAdd));
+    jobs.add(prLabelsAdd(pr, toAdd));
   }
 
   if (toAddMissing.length > 0 && createMissingLabels) {
     const createAndAdd = async () => {
-      await githubCreateLabels(toAddMissing, linearLabelColors);
-      await githubAddLabels(pr.number, toAddMissing);
+      await repoLabelsCreate(toAddMissing, linearLabelColors);
+      await prLabelsAdd(pr, toAddMissing);
     };
 
-    promises.push(createAndAdd());
+    jobs.add(createAndAdd());
   }
 
   if (toRemove.length > 0) {
-    promises.push(githubRemoveLabels(pr.number, toRemove));
+    jobs.add(prLabelsRemove(pr, toRemove));
   }
 
-  return Promise.all(promises).catch((error) => {
+  return jobs.complete().catch((error) => {
     console.log('Failed to sync labels');
     console.log('PR Labels:');
     console.log(pr.labels);
@@ -165,7 +165,7 @@ async function githubSyncLabels({ linearIssues, pr }: { linearIssues: Issue[]; p
   });
 }
 
-function githubGetRepoLabels() {
+function repoLabelsList() {
   return octokit.rest.issues
     .listLabelsForRepo({
       owner: context.repo.owner,
@@ -175,7 +175,7 @@ function githubGetRepoLabels() {
     .then((labels) => labels.map((label) => label.name));
 }
 
-async function githubCreateLabels(labels: string[], colors: Map<string, string>) {
+async function repoLabelsCreate(labels: string[], colors: Map<string, string>) {
   await Promise.all(
     labels.map((label) =>
       octokit.rest.issues.createLabel({
@@ -188,22 +188,22 @@ async function githubCreateLabels(labels: string[], colors: Map<string, string>)
   );
 }
 
-async function githubAddLabels(prNumber: number, labels: string[]) {
+async function prLabelsAdd(pr: PR, labels: string[]) {
   await octokit.rest.issues.addLabels({
     owner: context.repo.owner,
     repo: context.repo.repo,
-    issue_number: prNumber,
+    issue_number: pr.number,
     labels,
   });
 }
 
-async function githubRemoveLabels(prNumber: number, labels: string[]) {
+async function prLabelsRemove(pr: PR, labels: string[]) {
   await Promise.all(
     labels.map((label) =>
       octokit.rest.issues.removeLabel({
         owner: context.repo.owner,
         repo: context.repo.repo,
-        issue_number: prNumber,
+        issue_number: pr.number,
         name: label,
       }),
     ),
