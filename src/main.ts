@@ -1,10 +1,12 @@
-import { getInput, setFailed } from '@actions/core';
+import { getInput, getBooleanInput, setFailed } from '@actions/core';
 import { context, getOctokit } from '@actions/github';
 import { Issue, LinearClient, LinearFetch, Team, User, WorkflowState } from '@linear/sdk';
 import { WebhookPayload } from '@actions/github/lib/interfaces';
 
 const linearToken = getInput('linear-token', { required: true });
-const issuesRequired = getInput('issues-required', { required: false }) === 'true';
+const issuesRequired = getBooleanInput('issues-required', { required: false });
+const shouldAddLabels = getBooleanInput('add-labels', { required: false });
+const shouldRemoveLabels = getBooleanInput('remove-labels', { required: false });
 const issuePrefixes = getInput('issue-prefixes', { required: true })
   .split(' ')
   .map((prefix) => prefix.trim())
@@ -48,6 +50,21 @@ async function main() {
     throw new Error('Please, set issues in PR title');
   }
 
+  const foundIssues = await Promise.all(foundIssuesIds.map((id) => linearIssueFind(id)));
+
+  // just the declarative wrapper above promise array
+  // we collect the promises here, and await them at the end
+  const jobs = createJobs();
+
+  if (action === 'opened' || action === 'edited') {
+    jobs.add(
+      githubSyncLabels({
+        linearIssues: foundIssues,
+        pr: context.payload.pull_request as PR,
+      }),
+    );
+  }
+
   const prStatus = prStatusDetect(context.payload.pull_request as PR);
   const linearNextState = prStatusMapToLinear(prStatus);
   const linearPrLink = `[#${prId} ${title}](${prHtmlUrl}).`;
@@ -55,15 +72,95 @@ async function main() {
 
   const linearComment = `${linearPrLink} ${linearIssueText}`;
 
+  const processIssue = async (issue: Issue) => {
+    const currentState = await issue.state;
+    if (currentState.name !== linearNextState) {
+      await linearIssueMove(issue, linearNextState);
+      await linearIssueCommentSend(issue, linearComment);
+    }
+  };
+
+  for (const issue of foundIssues) {
+    jobs.add(processIssue(issue));
+  }
+
+  await jobs.complete();
+}
+
+function createJobs() {
+  const promises: Promise<unknown>[] = [];
+
+  return {
+    add: (job: Promise<unknown>) => {
+      promises.push(job);
+    },
+    complete: () => Promise.all(promises),
+  };
+}
+
+async function githubSyncLabels({ linearIssues, pr }: { linearIssues: Issue[]; pr: PR }) {
+  const prCurrentLabels = new Set(pr.labels.map((label) => label.name));
+  const linearActualLabels = new Set<string>();
+
+  const linearLabels = await Promise.all(linearIssues.map((issue) => issue.labels()));
+
+  for (const linearLabel of linearLabels) {
+    for (const node of linearLabel.nodes) {
+      linearActualLabels.add(node.name);
+    }
+  }
+
+  const toAdd: string[] = [];
+  const toRemove: string[] = [];
+
+  if (shouldAddLabels) {
+    for (const requiredLabel of linearActualLabels.values()) {
+      const alreadyHave = prCurrentLabels.has(requiredLabel);
+      if (alreadyHave) continue;
+      toAdd.push(requiredLabel);
+    }
+  }
+
+  if (shouldRemoveLabels) {
+    for (const currentLabel of prCurrentLabels.values()) {
+      const isWrong = !linearActualLabels.has(currentLabel);
+      if (!isWrong) continue;
+      toRemove.push(currentLabel);
+    }
+  }
+
+  const promises: Promise<void>[] = [];
+  if (toAdd.length > 0) promises.push(githubAddLabels(pr.number, toAdd));
+  if (toRemove.length > 0) promises.push(githubRemoveLabels(pr.number, toRemove));
+  return Promise.all(promises).catch((error) => {
+    console.log('Failed to sync labels')
+    console.log('PR Labels:')
+    console.log(pr.labels)
+    console.log('Linear Labels:')
+    console.log(Array.from(linearActualLabels))
+    console.error(error.message)
+  })
+}
+
+async function githubAddLabels(prNumber: number, labels: string[]) {
+  await octokit.rest.issues.addLabels({
+    owner: context.repo.owner,
+    repo: context.repo.repo,
+    issue_number: prNumber,
+    labels,
+  });
+}
+
+async function githubRemoveLabels(prNumber: number, labels: string[]) {
   await Promise.all(
-    foundIssuesIds.map(async (id) => {
-      const issue = await linearIssueFind(id);
-      const currentState = await issue.state;
-      if (currentState.name !== linearNextState) {
-        await linearIssueMove(issue, linearNextState);
-        await linearIssueCommentSend(issue, linearComment);
-      }
-    }),
+    labels.map((label) =>
+      octokit.rest.issues.removeLabel({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        issue_number: prNumber,
+        name: label,
+      }),
+    ),
   );
 }
 
@@ -75,6 +172,16 @@ function prStatusMapToLinear(prStatus: PullState): string {
   return state.linearStateName;
 }
 
+interface Label {
+  id: number;
+  node_id: string;
+  url: string;
+  name: string;
+  description: string;
+  color: string;
+  default: boolean;
+}
+
 interface PR {
   number: number;
   rebaseable: boolean;
@@ -82,6 +189,7 @@ interface PR {
   draft: boolean;
   html_url: string;
   state: 'open' | 'closed';
+  labels: Label[];
 }
 
 function prStatusDetect(pr: PR): PullState {
