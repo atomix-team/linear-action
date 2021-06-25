@@ -1,6 +1,6 @@
 import { getInput, getBooleanInput, setFailed } from '@actions/core';
 import { context, getOctokit } from '@actions/github';
-import { Issue, LinearClient, LinearFetch, Team, User, WorkflowState } from '@linear/sdk';
+import { Issue, LinearClient, LinearFetch, Team, User, WorkflowState, IssueLabel } from '@linear/sdk';
 import { WebhookPayload } from '@actions/github/lib/interfaces';
 
 const linearToken = getInput('linear-token', { required: true });
@@ -100,43 +100,46 @@ function createTaskBatcher() {
 }
 
 async function githubSyncLabels({ linearIssues, pr }: { linearIssues: Issue[]; pr: PR }) {
-  const repoAllLabels = new Set(await repoLabelsList());
-  const prCurrentLabels = new Set(pr.labels.map((label) => label.name));
-  const linearActualLabels = new Set<string>();
-  const linearLabelColors = new Map<string, string>();
+  const repoAllLabels = await repoLabelsList();
+  const linearActualLabelsMap = new Map<string, IssueLabel>();
 
   const linearLabels = await Promise.all(linearIssues.map((issue) => issue.labels()));
 
   for (const linearLabel of linearLabels) {
     for (const node of linearLabel.nodes) {
-      linearActualLabels.add(node.name);
-      linearLabelColors.set(node.name, node.color);
+      linearActualLabelsMap.set(node.name, node);
     }
   }
 
-  const toAdd: string[] = [];
-  const toAddMissing: string[] = [];
-  const toRemove: string[] = [];
+  const linearActualLabels = Array.from(linearActualLabelsMap.values())
+
+  const toAdd: AbstractLabel[] = [];
+  const toAddMissing: AbstractLabel[] = [];
+  const toRemove: AbstractLabel[] = [];
+
+  const byName = (label: AbstractLabel) => (another: AbstractLabel) => {
+    return label.name === another.name
+  }
 
   if (shouldAddLabels) {
-    for (const requiredLabel of linearActualLabels.values()) {
-      const alreadyHave = prCurrentLabels.has(requiredLabel);
-      if (alreadyHave) continue;
-      const exist = repoAllLabels.has(requiredLabel);
-      if (exist) toAdd.push(requiredLabel);
+    for (const requiredLabel of linearActualLabels) {
+      const foundLabel = pr.labels.find(byName(requiredLabel));
+      if (foundLabel) continue;
+      const existInRepo = repoAllLabels.find(byName(requiredLabel));
+      if (existInRepo) toAdd.push(requiredLabel);
       else toAddMissing.push(requiredLabel);
     }
   }
 
   if (shouldRemoveLabels) {
-    for (const currentLabel of prCurrentLabels.values()) {
-      const isWrong = !linearActualLabels.has(currentLabel);
+    for (const currentLabel of pr.labels) {
+      const isWrong = !linearActualLabels.find(byName(currentLabel));
       if (!isWrong) continue;
       toRemove.push(currentLabel);
     }
   }
 
-  const batcher = createTaskBatcher()
+  const batcher = createTaskBatcher();
 
   if (toAdd.length > 0) {
     batcher.add(prLabelsAdd(pr, toAdd));
@@ -144,7 +147,7 @@ async function githubSyncLabels({ linearIssues, pr }: { linearIssues: Issue[]; p
 
   if (toAddMissing.length > 0 && createMissingLabels) {
     const createAndAdd = async () => {
-      await repoLabelsCreate(toAddMissing, linearLabelColors);
+      await repoLabelsCreate(toAddMissing);
       await prLabelsAdd(pr, toAddMissing);
     };
 
@@ -171,40 +174,39 @@ function repoLabelsList() {
       owner: context.repo.owner,
       repo: context.repo.repo,
     })
-    .then((response) => response.data)
-    .then((labels) => labels.map((label) => label.name));
+    .then((response) => response.data);
 }
 
-async function repoLabelsCreate(labels: string[], colors: Map<string, string>) {
+async function repoLabelsCreate(labels: AbstractLabel[]) {
   await Promise.all(
     labels.map((label) =>
       octokit.rest.issues.createLabel({
         owner: context.repo.owner,
         repo: context.repo.repo,
-        name: label,
-        color: colors.get(label),
+        name: label.name,
+        color: label.color,
       }),
     ),
   );
 }
 
-async function prLabelsAdd(pr: PR, labels: string[]) {
+async function prLabelsAdd(pr: PR, labels: AbstractLabel[]) {
   await octokit.rest.issues.addLabels({
     owner: context.repo.owner,
     repo: context.repo.repo,
     issue_number: pr.number,
-    labels,
+    labels: labels.map(label => label.name)
   });
 }
 
-async function prLabelsRemove(pr: PR, labels: string[]) {
+async function prLabelsRemove(pr: PR, labels: AbstractLabel[]) {
   await Promise.all(
     labels.map((label) =>
       octokit.rest.issues.removeLabel({
         owner: context.repo.owner,
         repo: context.repo.repo,
         issue_number: pr.number,
-        name: label,
+        name: label.name,
       }),
     ),
   );
@@ -216,6 +218,11 @@ function prStatusMapToLinear(prStatus: PullState): string {
     throw new Error(`Not found linear state for "${prStatus}"`);
   }
   return state.linearStateName;
+}
+
+interface AbstractLabel {
+  name?: string
+  color?: string
 }
 
 interface Label {
