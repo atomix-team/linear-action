@@ -103,12 +103,14 @@ async function githubSyncLabels({ linearIssues, pr }: { linearIssues: Issue[]; p
   const repoAllLabels = new Set(await githubGetRepoLabels());
   const prCurrentLabels = new Set(pr.labels.map((label) => label.name));
   const linearActualLabels = new Set<string>();
+  const linearLabelColors = new Map<string, string>();
 
   const linearLabels = await Promise.all(linearIssues.map((issue) => issue.labels()));
 
   for (const linearLabel of linearLabels) {
     for (const node of linearLabel.nodes) {
       linearActualLabels.add(node.name);
+      linearLabelColors.set(node.name, node.color);
     }
   }
 
@@ -142,11 +144,11 @@ async function githubSyncLabels({ linearIssues, pr }: { linearIssues: Issue[]; p
 
   if (toAddMissing.length > 0 && createMissingLabels) {
     const createAndAdd = async () => {
-      await githubCreateLabels(toAddMissing)
-      await githubAddLabels(pr.number, toAddMissing)
-    }
+      await githubCreateLabels(toAddMissing, linearLabelColors);
+      await githubAddLabels(pr.number, toAddMissing);
+    };
 
-    promises.push(createAndAdd())
+    promises.push(createAndAdd());
   }
 
   if (toRemove.length > 0) {
@@ -173,13 +175,14 @@ function githubGetRepoLabels() {
     .then((labels) => labels.map((label) => label.name));
 }
 
-async function githubCreateLabels(labels: string[]) {
+async function githubCreateLabels(labels: string[], colors: Map<string, string>) {
   await Promise.all(
     labels.map((label) =>
       octokit.rest.issues.createLabel({
         owner: context.repo.owner,
         repo: context.repo.repo,
         name: label,
+        color: colors.get(label),
       }),
     ),
   );
