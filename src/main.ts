@@ -55,10 +55,10 @@ async function main() {
 
   // just the declarative wrapper over promise array
   // we collect the promises here, and await them at the end
-  const jobs = createJobs();
+  const batcher = createTaskBatcher();
 
   if (action === 'opened' || action === 'edited') {
-    jobs.add(
+    batcher.add(
       githubSyncLabels({
         linearIssues: foundIssues,
         pr: context.payload.pull_request as PR,
@@ -82,20 +82,20 @@ async function main() {
   };
 
   for (const issue of foundIssues) {
-    jobs.add(linearIssueProcess(issue));
+    batcher.add(linearIssueProcess(issue));
   }
 
-  await jobs.complete();
+  await batcher.execute();
 }
 
-function createJobs() {
+function createTaskBatcher() {
   const promises: Promise<unknown>[] = [];
 
   return {
     add: (job: Promise<unknown>) => {
       promises.push(job);
     },
-    complete: () => Promise.all(promises),
+    execute: () => Promise.all(promises),
   };
 }
 
@@ -136,10 +136,10 @@ async function githubSyncLabels({ linearIssues, pr }: { linearIssues: Issue[]; p
     }
   }
 
-  const jobs = createJobs()
+  const batcher = createTaskBatcher()
 
   if (toAdd.length > 0) {
-    jobs.add(prLabelsAdd(pr, toAdd));
+    batcher.add(prLabelsAdd(pr, toAdd));
   }
 
   if (toAddMissing.length > 0 && createMissingLabels) {
@@ -148,14 +148,14 @@ async function githubSyncLabels({ linearIssues, pr }: { linearIssues: Issue[]; p
       await prLabelsAdd(pr, toAddMissing);
     };
 
-    jobs.add(createAndAdd());
+    batcher.add(createAndAdd());
   }
 
   if (toRemove.length > 0) {
-    jobs.add(prLabelsRemove(pr, toRemove));
+    batcher.add(prLabelsRemove(pr, toRemove));
   }
 
-  return jobs.complete().catch((error) => {
+  return batcher.execute().catch((error) => {
     console.log('Failed to sync labels');
     console.log('PR Labels:');
     console.log(pr.labels);
