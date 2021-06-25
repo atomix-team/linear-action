@@ -24,6 +24,10 @@ inputs:
     required: false
     default: 'true'
     description: 'When the pull request is edited, remove the wrong labels'
+  create-missing-labels:
+    required: false
+    default: 'true'
+    description: 'When the label was not found in the repo - create it'
 
 runs:
   using: 'docker'

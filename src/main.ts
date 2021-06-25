@@ -7,6 +7,7 @@ const linearToken = getInput('linear-token', { required: true });
 const issuesRequired = getBooleanInput('issues-required', { required: false });
 const shouldAddLabels = getBooleanInput('add-labels', { required: false });
 const shouldRemoveLabels = getBooleanInput('remove-labels', { required: false });
+const createMissingLabels = getBooleanInput('create-missing-labels', { required: false });
 const issuePrefixes = getInput('issue-prefixes', { required: true })
   .split(' ')
   .map((prefix) => prefix.trim())
@@ -99,6 +100,7 @@ function createJobs() {
 }
 
 async function githubSyncLabels({ linearIssues, pr }: { linearIssues: Issue[]; pr: PR }) {
+  const repoAllLabels = new Set(await githubGetRepoLabels());
   const prCurrentLabels = new Set(pr.labels.map((label) => label.name));
   const linearActualLabels = new Set<string>();
 
@@ -111,13 +113,16 @@ async function githubSyncLabels({ linearIssues, pr }: { linearIssues: Issue[]; p
   }
 
   const toAdd: string[] = [];
+  const toAddMissing: string[] = [];
   const toRemove: string[] = [];
 
   if (shouldAddLabels) {
     for (const requiredLabel of linearActualLabels.values()) {
       const alreadyHave = prCurrentLabels.has(requiredLabel);
       if (alreadyHave) continue;
-      toAdd.push(requiredLabel);
+      const exist = repoAllLabels.has(requiredLabel);
+      if (exist) toAdd.push(requiredLabel);
+      else toAddMissing.push(requiredLabel);
     }
   }
 
@@ -130,16 +135,54 @@ async function githubSyncLabels({ linearIssues, pr }: { linearIssues: Issue[]; p
   }
 
   const promises: Promise<void>[] = [];
-  if (toAdd.length > 0) promises.push(githubAddLabels(pr.number, toAdd));
-  if (toRemove.length > 0) promises.push(githubRemoveLabels(pr.number, toRemove));
+
+  if (toAdd.length > 0) {
+    promises.push(githubAddLabels(pr.number, toAdd));
+  }
+
+  if (toAddMissing.length > 0 && createMissingLabels) {
+    const createAndAdd = async () => {
+      await githubCreateLabels(toAddMissing)
+      await githubAddLabels(pr.number, toAddMissing)
+    }
+
+    promises.push(createAndAdd())
+  }
+
+  if (toRemove.length > 0) {
+    promises.push(githubRemoveLabels(pr.number, toRemove));
+  }
+
   return Promise.all(promises).catch((error) => {
-    console.log('Failed to sync labels')
-    console.log('PR Labels:')
-    console.log(pr.labels)
-    console.log('Linear Labels:')
-    console.log(Array.from(linearActualLabels))
-    console.error(error.message)
-  })
+    console.log('Failed to sync labels');
+    console.log('PR Labels:');
+    console.log(pr.labels);
+    console.log('Linear Labels:');
+    console.log(Array.from(linearActualLabels));
+    console.error(error.message);
+  });
+}
+
+function githubGetRepoLabels() {
+  return octokit.rest.issues
+    .listLabelsForRepo({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+    })
+    .then((response) => response.data)
+    .then((labels) => labels.map((label) => label.name));
+}
+
+async function githubCreateLabels(labels: string[]) {
+  await Promise.all(
+    labels.map((label) =>
+      octokit.rest.issues.createLabel({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        name: label,
+      }),
+    ),
+  );
 }
 
 async function githubAddLabels(prNumber: number, labels: string[]) {
