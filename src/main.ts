@@ -53,7 +53,7 @@ async function main() {
 
   const foundIssues = await Promise.all(foundIssuesIds.map((id) => linearIssueFind(id)));
 
-  // just the declarative wrapper above promise array
+  // just the declarative wrapper over promise array
   // we collect the promises here, and await them at the end
   const jobs = createJobs();
 
