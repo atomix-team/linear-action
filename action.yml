@@ -16,6 +16,19 @@ inputs:
     required: true
     description: 'How to change issue state when pull request is opened or merged (case sensitive)'
     default: 'drafted = In Progress; ready = In Review; merged = Done; closed = Canceled'
+  add-labels:
+    required: false
+    default: 'true'
+    description: 'When the pull request is opened/edited, add the labels (if found) from the Linear issue'
+  remove-labels:
+    required: false
+    default: 'true'
+    description: 'When the pull request is edited, remove the wrong labels'
+  create-missing-labels:
+    required: false
+    default: 'true'
+    description: 'When the label was not found in the repo - create it'
+
 runs:
   using: 'docker'
   image: 'Dockerfile'
