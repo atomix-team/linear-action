@@ -1,6 +1,14 @@
 import { getInput, getBooleanInput, setFailed } from '@actions/core';
 import { context, getOctokit } from '@actions/github';
-import { Issue, LinearClient, LinearFetch, Team, User, WorkflowState, IssueLabel } from '@linear/sdk';
+import {
+  Issue,
+  LinearClient,
+  LinearFetch,
+  Team,
+  User,
+  WorkflowState,
+  IssueLabel,
+} from '@linear/sdk';
 import { WebhookPayload } from '@actions/github/lib/interfaces';
 
 const linearToken = getInput('linear-token', { required: true });
@@ -111,15 +119,15 @@ async function githubSyncLabels({ linearIssues, pr }: { linearIssues: Issue[]; p
     }
   }
 
-  const linearActualLabels = Array.from(linearActualLabelsMap.values())
+  const linearActualLabels = Array.from(linearActualLabelsMap.values());
 
   const toAdd: AbstractLabel[] = [];
   const toAddMissing: AbstractLabel[] = [];
   const toRemove: AbstractLabel[] = [];
 
   const byName = (label: AbstractLabel) => (another: AbstractLabel) => {
-    return label.name === another.name
-  }
+    return label.name === another.name;
+  };
 
   if (shouldAddLabels) {
     for (const requiredLabel of linearActualLabels) {
@@ -184,7 +192,7 @@ async function repoLabelsCreate(labels: AbstractLabel[]) {
         owner: context.repo.owner,
         repo: context.repo.repo,
         name: label.name,
-        color: label.color,
+        color: ColorFormat.github(label.color),
       }),
     ),
   );
@@ -195,7 +203,7 @@ async function prLabelsAdd(pr: PR, labels: AbstractLabel[]) {
     owner: context.repo.owner,
     repo: context.repo.repo,
     issue_number: pr.number,
-    labels: labels.map(label => label.name)
+    labels: labels.map((label) => label.name),
   });
 }
 
@@ -212,17 +220,20 @@ async function prLabelsRemove(pr: PR, labels: AbstractLabel[]) {
   );
 }
 
-function prStatusMapToLinear(prStatus: PullState): string {
-  const state = stateMap.find(({ pullState }) => pullState === prStatus);
-  if (!state) {
-    throw new Error(`Not found linear state for "${prStatus}"`);
-  }
-  return state.linearStateName;
-}
+const ColorFormat = {
+  linear: (string: string) => {
+    if (string.startsWith('#')) return string.toUpperCase();
+    return '#' + string.toUpperCase();
+  },
+  github: (string: string) => {
+    if (!string.startsWith('#')) return string.toLowerCase();
+    return string.slice(1).toLowerCase();
+  },
+};
 
 interface AbstractLabel {
-  name?: string
-  color?: string
+  name?: string;
+  color?: string;
 }
 
 interface Label {
@@ -243,6 +254,14 @@ interface PR {
   html_url: string;
   state: 'open' | 'closed';
   labels: Label[];
+}
+
+function prStatusMapToLinear(prStatus: PullState): string {
+  const state = stateMap.find(({ pullState }) => pullState === prStatus);
+  if (!state) {
+    throw new Error(`Not found linear state for "${prStatus}"`);
+  }
+  return state.linearStateName;
 }
 
 function prStatusDetect(pr: PR): PullState {
