@@ -46,20 +46,27 @@ async function main() {
   const { nodes: allTeams } = await linear.teams();
   // Validate configuration state-map, that all pr state exist in allowedPullStates
   const resolvedTeams = await resolveValidTeamsByPrefixes(allTeams);
+  LOG_LIST(
+    'Found teams for prefixes',
+    resolvedTeams.map((t) => t.name),
+  );
+
   await Promise.all(resolvedTeams.map((team) => linearStateMapAssert(team)));
 
-  console.log('——', context);
+  // console.log('——', context);
   const { action, eventName } = context.payload;
   const pullRequest = context.payload.pull_request as PR;
   const { title, draft, html_url: prHtmlUrl, number: prId } = pullRequest;
 
   const foundIssuesIds = findIssuesInText(title);
+  LOG_LIST('Found issues in PR title', foundIssuesIds);
   if (issuesRequired && foundIssuesIds.length === 0) {
     // stop check
     throw new Error('Please, set issues in PR title');
   }
 
   const foundIssues = await Promise.all(foundIssuesIds.map((id) => linearIssueFind(id)));
+  console.log(`Resolved ${foundIssues.length} issues with specified prefixes`);
 
   // just the declarative wrapper over promise array
   // we collect the promises here, and await them at the end
@@ -75,16 +82,23 @@ async function main() {
   }
 
   const prStatus = prStatusDetect(pullRequest);
+  LOG(`Pull request status`, prStatus);
+
   const linearNextState = prStatusMapToLinear(prStatus);
+  LOG(`Linear issues status should be changed to`, linearNextState);
+
   const linearComment = linearCommentText[prStatus](pullRequest);
 
   const linearIssueProcess = async (issue: Issue) => {
     const currentState = await issue.state;
-    if (currentState.name !== linearNextState) {
-      await linearLinkUpdate(issue, pullRequest);
+    const isDiffers = currentState.name !== linearNextState;
+    LOG(`Is linear issue state differs from next state`, isDiffers);
+
+    if (isDiffers) {
       await linearIssueCommentSend(issue, linearComment);
       await linearIssueMove(issue, linearNextState);
     }
+    await linearLinkUpdate(issue, pullRequest);
   };
 
   for (const issue of foundIssues) {
@@ -148,10 +162,18 @@ async function githubSyncLabels({ linearIssues, pr }: { linearIssues: Issue[]; p
   const batcher = createTaskBatcher();
 
   if (toAdd.length > 0) {
+    LOG_LIST(
+      'Found labels to add',
+      toAdd.map((l) => l.name),
+    );
     batcher.add(prLabelsAdd(pr, toAdd));
   }
 
   if (toAddMissing.length > 0 && createMissingLabels) {
+    LOG_LIST(
+      'Should create missing labels',
+      toAddMissing.map((l) => l.name),
+    );
     const createAndAdd = async () => {
       await repoLabelsCreate(toAddMissing);
       await prLabelsAdd(pr, toAddMissing);
@@ -161,6 +183,10 @@ async function githubSyncLabels({ linearIssues, pr }: { linearIssues: Issue[]; p
   }
 
   if (toRemove.length > 0) {
+    LOG_LIST(
+      'Found labels to remove',
+      toRemove.map((l) => l.name),
+    );
     batcher.add(prLabelsRemove(pr, toRemove));
   }
 
@@ -193,16 +219,28 @@ async function repoLabelsCreate(labels: AbstractLabel[]) {
         color: ColorFormat.github(label.color),
       }),
     ),
-  );
+  ).then(() => {
+    LOG_LIST(
+      'Labels created',
+      labels.map((l) => l.name),
+    );
+  });
 }
 
 async function prLabelsAdd(pr: PR, labels: AbstractLabel[]) {
-  await octokit.rest.issues.addLabels({
-    owner: context.repo.owner,
-    repo: context.repo.repo,
-    issue_number: pr.number,
-    labels: labels.map((label) => label.name),
-  });
+  await octokit.rest.issues
+    .addLabels({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      issue_number: pr.number,
+      labels: labels.map((label) => label.name),
+    })
+    .then(() => {
+      LOG_LIST(
+        `Labels added to #${pr.number}`,
+        labels.map((l) => l.name),
+      );
+    });
 }
 
 async function prLabelsRemove(pr: PR, labels: AbstractLabel[]) {
@@ -215,7 +253,12 @@ async function prLabelsRemove(pr: PR, labels: AbstractLabel[]) {
         name: label.name,
       }),
     ),
-  );
+  ).then(() => {
+    LOG_LIST(
+      `Labels removed from #${pr.number}`,
+      labels.map((l) => l.name),
+    );
+  });
 }
 
 const ColorFormat = {
@@ -373,6 +416,8 @@ async function linearIssueMove(issue: Issue, moveTo: string) {
       throw new Error(`Not found state "${moveTo}" in team ${team.name} ${team.key}`);
     }
     await linear.issueUpdate(issue.id, { stateId: moveToState.id });
+
+    LOG(`Issue ${issue.identifier} moved from "${currentState.name}" to`, moveTo);
   }
 }
 
@@ -386,15 +431,20 @@ async function linearLinkUpdate(issue: Issue, pr: PR) {
     }
   }
 
+  const title = `#${pr.number} ${pr.title}`;
+  const subtitle = linearAttachmentStatus(pr);
+
   await linear.attachmentCreate({
     issueId: issue.id,
     id: targetId,
-    title: `#${pr.number} ${pr.title}`,
-    subtitle: linearAttachmentStatus(pr),
+    title,
+    subtitle,
     url: pr.html_url,
     iconUrl: 'https://sergeysova.github.io/public/GitHub-Mark-64px.png',
     metadata: { pullRequestId: pr.number },
   });
+
+  LOG(`Attachment created for ${issue.identifier}`, `${title} ${subtitle}`);
 }
 
 function linearAttachmentStatus(pr: PR) {
@@ -412,6 +462,7 @@ function linearAttachmentStatus(pr: PR) {
 
 async function linearIssueCommentSend(issue: Issue, markdown: string) {
   await linear.commentCreate({ body: markdown, issueId: issue.id });
+  LOG(`Comment sent to ${issue.identifier}`, markdown);
 }
 
 main().catch((error) => {
@@ -419,3 +470,14 @@ main().catch((error) => {
   setFailed(error);
   process.exit(-1);
 });
+
+function LOG_LIST<T extends string | number | boolean | null | undefined>(
+  prefix: string,
+  list: Array<T>,
+) {
+  console.log(`${prefix}: [${list.map((e) => JSON.stringify(e)).join(', ')}]`);
+}
+
+function LOG<T extends string | number | boolean | null | undefined>(prefix: string, value: T) {
+  console.log(`${prefix}: ${JSON.stringify(value)}`);
+}
