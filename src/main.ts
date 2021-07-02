@@ -50,8 +50,8 @@ async function main() {
 
   console.log('——', context);
   const { action, eventName } = context.payload;
-  // before resolving next state (and sending comment) check out, that linear issue already in current state
-  const { title, draft, html_url: prHtmlUrl, number: prId } = context.payload.pull_request;
+  const pullRequest = context.payload.pull_request as PR;
+  const { title, draft, html_url: prHtmlUrl, number: prId } = pullRequest;
 
   const foundIssuesIds = findIssuesInText(title);
   if (issuesRequired && foundIssuesIds.length === 0) {
@@ -69,23 +69,21 @@ async function main() {
     batcher.add(
       githubSyncLabels({
         linearIssues: foundIssues,
-        pr: context.payload.pull_request as PR,
+        pr: pullRequest,
       }),
     );
   }
 
-  const prStatus = prStatusDetect(context.payload.pull_request as PR);
+  const prStatus = prStatusDetect(pullRequest);
   const linearNextState = prStatusMapToLinear(prStatus);
-  const linearPrLink = `[#${prId} ${title}](${prHtmlUrl}).`;
-  const linearIssueText = linearCommentText[prStatus](context.payload.pull_request as PR);
-
-  const linearComment = `${linearPrLink} ${linearIssueText}`;
+  const linearComment = linearCommentText[prStatus](pullRequest);
 
   const linearIssueProcess = async (issue: Issue) => {
     const currentState = await issue.state;
     if (currentState.name !== linearNextState) {
-      await linearIssueMove(issue, linearNextState);
+      await linearLinkUpdate(issue, pullRequest);
       await linearIssueCommentSend(issue, linearComment);
+      await linearIssueMove(issue, linearNextState);
     }
   };
 
@@ -247,6 +245,7 @@ interface Label {
 }
 
 interface PR {
+  title: string;
   number: number;
   rebaseable: boolean;
   merged: boolean;
@@ -374,6 +373,38 @@ async function linearIssueMove(issue: Issue, moveTo: string) {
       throw new Error(`Not found state "${moveTo}" in team ${team.name} ${team.key}`);
     }
     await linear.issueUpdate(issue.id, { stateId: moveToState.id });
+  }
+}
+
+async function linearLinkUpdate(issue: Issue, pr: PR) {
+  let targetId;
+  const attachments = await issue.attachments();
+  if (attachments) {
+    const found = attachments.nodes.find((attach) => attach.metadata.pullRequestId === pr.number);
+    targetId = found.id;
+  }
+
+  await linear.attachmentCreate({
+    issueId: issue.id,
+    id: targetId,
+    title: `#${pr.number} ${pr.title}`,
+    subtitle: linearAttachmentStatus(pr),
+    url: pr.html_url,
+    iconUrl: 'https://sergeysova.github.io/public/GitHub-Mark-64px.png',
+    metadata: { pullRequestId: pr.number },
+  });
+}
+
+function linearAttachmentStatus(pr: PR) {
+  switch (prStatusDetect(pr)) {
+    case 'merged':
+      return 'Merged';
+    case 'closed':
+      return 'Closed';
+    case 'drafted':
+      return 'In Draft';
+    case 'ready':
+      return 'In Review';
   }
 }
 
