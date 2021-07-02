@@ -380,7 +380,7 @@ async function linearLinkUpdate(issue: Issue, pr: PR) {
   let targetId;
   const attachments = await issue.attachments();
   if (attachments) {
-    const found = attachments.nodes.find((attach) => attach.metadata.pullRequestId === pr.number);
+    const found = attachments.nodes.find((attach) => attach.metadata?.pullRequestId === pr.number);
     if (found) {
       targetId = found.id;
     }
