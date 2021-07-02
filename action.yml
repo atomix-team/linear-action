@@ -30,8 +30,8 @@ inputs:
     description: 'When the label was not found in the repo - create it'
 
 runs:
-  using: 'docker'
-  image: 'Dockerfile'
+  using: 'node12'
+  main: 'dist/index.js'
 branding:
   color: blue
   icon: download-cloud

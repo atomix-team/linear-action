@@ -2,11 +2,11 @@
   "name": "action",
   "version": "0.1.0",
   "description": "",
-  "main": "index.js",
+  "main": "dist/index.js",
   "scripts": {
     "test": "jest",
     "format": "prettier --write 'src/**/*.{ts,tsx,js, jsx}'",
-    "build": "tsc --outDir ./dist"
+    "build": "tsc && rm -rf dist && ncc build src/main.ts -o dist"
   },
   "repository": {
     "type": "git",
@@ -28,6 +28,7 @@
     "@babel/preset-typescript": "^7.13.0",
     "@types/jest": "^26.0.23",
     "@types/node": "^15.12.2",
+    "@vercel/ncc": "^0.28.6",
     "babel-jest": "^27.0.2",
     "babel-plugin-module-resolver": "^4.1.0",
     "jest": "^27.0.4",
