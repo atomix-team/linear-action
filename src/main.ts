@@ -381,7 +381,9 @@ async function linearLinkUpdate(issue: Issue, pr: PR) {
   const attachments = await issue.attachments();
   if (attachments) {
     const found = attachments.nodes.find((attach) => attach.metadata.pullRequestId === pr.number);
-    targetId = found.id;
+    if (found) {
+      targetId = found.id;
+    }
   }
 
   await linear.attachmentCreate({
