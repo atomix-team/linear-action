@@ -1,0 +1,56 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Set Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '14'
+
+      - name: Extract version
+        id: version
+        uses: olegtarasov/get-tag@v2.1
+        with:
+          tagRegex: 'v(.*)'
+
+      - name: Install Dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build
+        run: yarn build
+
+      - name: Setup git credentials
+        uses: oleksiyrudenko/gha-git-credentials@v2-latest
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add build to Git
+        run: git add dist/index.js --force
+
+      - name: Commit build files
+        run: git commit -m "add build files"
+      
+      - name: Move release tag
+        run: git tag v${{ steps.version.outputs.tag }} --force
+
+      - id: major_version
+        uses: actions/github-script@0.9.0
+        with:
+          script: |
+            const number = '${{ steps.version.outputs.tag }}'.split('.')[0]
+            core.setOutput('number', number)
+      - name: Move major tag
+        run: git tag v${{ steps.major_version.outputs.number }} --force
+
+      - name: Push tags
+        run: git push --tags --force
