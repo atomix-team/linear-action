@@ -49,6 +49,7 @@ jobs:
           script: |
             const number = '${{ steps.version.outputs.tag }}'.split('.')[0]
             core.setOutput('number', number)
+
       - name: Move major tag
         run: git tag v${{ steps.major_version.outputs.number }} --force
 
