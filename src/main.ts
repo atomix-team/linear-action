@@ -59,14 +59,21 @@ async function main() {
   const { title, draft, html_url: prHtmlUrl, number: prId } = pullRequest;
 
   const foundIssuesIds = findIssuesInText(title);
-  LOG_LIST('Found issues in PR title', foundIssuesIds);
+  LOG_LIST('Found linear issues IDs in PR title', foundIssuesIds);
   if (issuesRequired && foundIssuesIds.length === 0) {
     // stop check
-    throw new Error('Please, set issues in PR title');
+    throw new Error('Please, add issues IDs into the PR title');
   }
 
-  const foundIssues = await Promise.all(foundIssuesIds.map((id) => linearIssueFind(id)));
-  console.log(`Resolved ${foundIssues.length} issues with specified prefixes`);
+  const possibleIssues = await Promise.all(foundIssuesIds.map((id) => linearIssueFind(id)));
+  const foundIssues = possibleIssues.filter(issue => issue !== null);
+  LOG_LIST(`Found ${foundIssues.length} issues by ids`, foundIssues.map(issue => issue.title));
+
+  const notFoundIDs = foundIssuesIds.filter(id => !foundIssues.find(issue => issue.identifier === id))
+  if (notFoundIDs.length > 0) {
+    LOG_LIST('Failed to find issues for IDS', notFoundIDs);
+    throw new Error(`Please, review list of your issue IDs in PR title`);
+  }
 
   // just the declarative wrapper over promise array
   // we collect the promises here, and await them at the end
